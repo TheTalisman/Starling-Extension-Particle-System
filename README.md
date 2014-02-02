@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 Starling Extension: Particle System
 ===================================
 
@@ -26,10 +27,19 @@ The `demo`-directory contains a sample project. To compile it, add a reference t
 
 The project contains 4 sample configurations. Switch between configurations in `Demo.as` by 
 hitting the space bar.
+=======
+Starling Extension: Animated Particle System
+===================================
+
+This Starling Extension allows you to create PD (Particle Designer) particle systems using animations from Sprite Sheets by passing a Starling TextureAtlas instance to the particle system constructor.
+
+This extension depends on the Starling Framework: https://github.com/PrimaryFeather/Starling-Framework and the Starling-Extension-Particle-System: https://github.com/PrimaryFeather/Starling-Extension-Particle-System
+>>>>>>> 44f4a052f3f566fd05b9d9dfb66877592104d807
 
 Sample Code
 -----------
 
+<<<<<<< HEAD
 The class `ParticleSystem` extends `DisplayObject` and behaves accordingly. You can add it as a child to the stage or any other container. As usual, you have to add it to a juggler (or call its `advanceTime` method once per frame) to animate it.
 
     // create particle system
@@ -46,11 +56,25 @@ The class `ParticleSystem` extends `DisplayObject` and behaves accordingly. You 
 
     // stop emitting particles
     mParticleSystem.stop();
+=======
+The example directory contains a quick demonstration for creating a particle system of 500 animated birds. All artwork in the example belongs to Gamua/PrimaryFeather. A compiled version of the example can be seen here: http://onebyonedesign.com/flash/starling/anipart/
+>>>>>>> 44f4a052f3f566fd05b9d9dfb66877592104d807
 
 More information
 ----------------
 
+<<<<<<< HEAD
 You can find more information in the [Starling Wiki](http://wiki.starling-framework.org/extensions/particlesystem).
 
 [1]: http://www.starling-framework.org
 [2]: http://particledesigner.71squared.com
+=======
+Particle configurations can be created with the 71 Squared Particle Designer or the online Particle Editor. Sprite sheets can be created with Texture Packer or within the Flash IDE (or other sprite sheet generators). For the moment, sprite sheets should be created with equally sized rectangles (no clipping) - this is a known issue and is being worked. For more info, see:
+
+- http://www.starling-framework.org
+- http://particledesigner.71squared.com
+- http://onebyonedesign.com/flash/particleeditor/
+- https://github.com/PrimaryFeather/Starling-Extension-Particle-System
+- http://www.codeandweb.com/texturepacker
+- http://www.adobe.com/devnet/flash/articles/using-sprite-sheet-generator.html
+>>>>>>> 44f4a052f3f566fd05b9d9dfb66877592104d807
