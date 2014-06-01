@@ -15,7 +15,6 @@ package starling.extensions
     import flash.display3D.Context3D;
     import flash.display3D.Context3DBlendFactor;
     import flash.display3D.Context3DProgramType;
-    import flash.display3D.Context3DTextureFormat;
     import flash.display3D.Context3DVertexBufferFormat;
     import flash.display3D.IndexBuffer3D;
     import flash.display3D.Program3D;
@@ -31,6 +30,7 @@ package starling.extensions
     import starling.errors.MissingContextError;
     import starling.events.Event;
     import starling.textures.Texture;
+    import starling.textures.TextureSmoothing;
     import starling.utils.MatrixUtil;
     import starling.utils.VertexData;
     
@@ -39,6 +39,8 @@ package starling.extensions
     
     public class ParticleSystem extends DisplayObject implements IAnimatable
     {
+        public static const MAX_NUM_PARTICLES:int = 16383;
+        
         private var mTexture:Texture;
         private var mParticles:Vector.<Particle>;
         private var mFrameTime:Number;
@@ -64,9 +66,10 @@ package starling.extensions
         protected var mPremultipliedAlpha:Boolean;
         protected var mBlendFactorSource:String;     
         protected var mBlendFactorDestination:String;
+        protected var mSmoothing:String;
         
         public function ParticleSystem(texture:Texture, emissionRate:Number, 
-                                       initialCapacity:int=128, maxCapacity:int=8192,
+                                       initialCapacity:int=128, maxCapacity:int=16383,
                                        blendFactorSource:String=null, blendFactorDest:String=null)
         {
             if (texture == null) throw new ArgumentError("texture must not be null");
@@ -80,7 +83,8 @@ package starling.extensions
             mEmissionTime = 0.0;
             mFrameTime = 0.0;
             mEmitterX = mEmitterY = 0;
-            mMaxCapacity = Math.min(8192, maxCapacity);
+            mMaxCapacity = Math.min(MAX_NUM_PARTICLES, maxCapacity);
+            mSmoothing = TextureSmoothing.BILINEAR;
             
             mBlendFactorDestination = blendFactorDest || Context3DBlendFactor.ONE_MINUS_SOURCE_ALPHA;
             mBlendFactorSource = blendFactorSource ||
@@ -100,7 +104,6 @@ package starling.extensions
             
             if (mVertexBuffer) mVertexBuffer.dispose();
             if (mIndexBuffer)  mIndexBuffer.dispose();
-            if (mProgram)      mProgram.dispose();
             
             super.dispose();
         }
@@ -182,24 +185,25 @@ package starling.extensions
             mIndexBuffer.uploadFromVector(mIndices, 0, newCapacity * 6);
         }
         
-        /** Starts the sysytem for a certain time. @default infinite time */
+        /** Starts the emitter for a certain time. @default infinite time */
         public function start(duration:Number=Number.MAX_VALUE):void
         {
             if (mEmissionRate != 0)                
                 mEmissionTime = duration;
         }
         
-        /** Stops the system and removes all existing particles. */
-        public function stop():void
+        /** Stops emitting new particles. Depending on 'clearParticles', the existing particles
+         *  will either keep animating until they die or will be removed right away. */
+        public function stop(clearParticles:Boolean=false):void
         {
             mEmissionTime = 0.0;
-            mNumParticles = 0;
+            if (clearParticles) clear();
         }
         
-        /** Pauses the system; when you 'start' again, it will continue from the old state. */
-        public function pause():void
+        /** Removes all currently active particles. */
+        public function clear():void
         {
-            mEmissionTime = 0.0;
+            mNumParticles = 0;
         }
         
         /** Returns an empty rectangle at the particle system's position. Calculating the
@@ -246,7 +250,7 @@ package starling.extensions
                     
                     --mNumParticles;
                     
-                    if (mNumParticles == 0)
+                    if (mNumParticles == 0 && mEmissionTime == 0)
                         dispatchEvent(new Event(Event.COMPLETE));
                 }
             }
@@ -265,9 +269,15 @@ package starling.extensions
                         if (mNumParticles == capacity)
                             raiseCapacity(capacity);
                     
-                        particle = mParticles[int(mNumParticles++)] as Particle;
+                        particle = mParticles[mNumParticles] as Particle;
                         initParticle(particle);
-                        advanceParticle(particle, mFrameTime);
+                        
+                        // particle might be dead at birth
+                        if (particle.totalTime > 0.0)
+                        {
+                            advanceParticle(particle, mFrameTime);
+                            ++mNumParticles
+                        }
                     }
                     
                     mFrameTime -= timeBetweenParticles;
@@ -301,10 +311,7 @@ package starling.extensions
                 yOffset = textureHeight * particle.scale >> 1;
                 
                 for (var j:int=0; j<4; ++j)
-                {
-                    mVertexData.setColor(vertexID+j, color);
-                    mVertexData.setAlpha(vertexID+j, alpha);
-                }
+                    mVertexData.setColorAndAlpha(vertexID+j, color, alpha);
                 
                 if (rotation)
                 {
@@ -375,50 +382,70 @@ package starling.extensions
             context.setVertexBufferAt(2, null);
         }
         
+        /** Initialize the <tt>ParticleSystem</tt> with particles distributed randomly throughout
+         *  their lifespans. */
+        public function populate(count:int):void
+        {
+            count = Math.min(count, mMaxCapacity - mNumParticles);
+            
+            if (mNumParticles + count > capacity)
+                raiseCapacity(mNumParticles + count - capacity);
+            
+            var p:Particle;
+            for (var i:int=0; i<count; i++)
+            {
+                p = mParticles[mNumParticles+i];
+                initParticle(p);
+                advanceParticle(p, Math.random() * p.totalTime);
+            }
+            
+            mNumParticles += count;
+        }
+        
         // program management
         
         private function createProgram():void
         {
             var mipmap:Boolean = mTexture.mipMapping;
             var textureFormat:String = mTexture.format;
-            var context:Context3D = Starling.context;
+            var programName:String = "ext.ParticleSystem." + textureFormat + "/" +
+                                     mSmoothing.charAt(0) + (mipmap ? "+mm" : "");
             
-            if (context == null) throw new MissingContextError();
-            if (mProgram) mProgram.dispose();
+            mProgram = Starling.current.getProgram(programName);
             
-            // create vertex and fragment programs from assembly.
-            
-            var textureOptions:String = "2d, clamp, linear, " + (mipmap ? "mipnearest" : "mipnone");
-            
-            if (textureFormat == Context3DTextureFormat.COMPRESSED)
-                textureOptions += ", dxt1";
-            else if (textureFormat == "compressedAlpha")
-                textureOptions += ", dxt5";
-            
-            var vertexProgramCode:String =
-                "m44 op, va0, vc0 \n" + // 4x4 matrix transform to output clipspace
-                "mul v0, va1, vc4 \n" + // multiply color with alpha and pass to fragment program
-                "mov v1, va2      \n";  // pass texture coordinates to fragment program
-            
-            var fragmentProgramCode:String =
-                "tex ft1, v1, fs0 <" + textureOptions + "> \n" + // sample texture 0
-                "mul oc, ft1, v0";                               // multiply color with texel color
-            
-            var vertexProgramAssembler:AGALMiniAssembler = new AGALMiniAssembler();
-            vertexProgramAssembler.assemble(Context3DProgramType.VERTEX, vertexProgramCode);
-            
-            var fragmentProgramAssembler:AGALMiniAssembler = new AGALMiniAssembler();
-            fragmentProgramAssembler.assemble(Context3DProgramType.FRAGMENT, fragmentProgramCode);
+            if (mProgram == null)
+            {
+                var textureOptions:String =
+                    RenderSupport.getTextureLookupFlags(textureFormat, mipmap, false, mSmoothing);
                 
-            mProgram = context.createProgram();
-            mProgram.upload(vertexProgramAssembler.agalcode, fragmentProgramAssembler.agalcode);
+                var vertexProgramCode:String =
+                    "m44 op, va0, vc0 \n" + // 4x4 matrix transform to output clipspace
+                    "mul v0, va1, vc4 \n" + // multiply color with alpha and pass to fragment program
+                    "mov v1, va2      \n";  // pass texture coordinates to fragment program
+                
+                var fragmentProgramCode:String =
+                    "tex ft1, v1, fs0 " + textureOptions + "\n" + // sample texture 0
+                    "mul oc, ft1, v0";                            // multiply color with texel color
+                
+                var assembler:AGALMiniAssembler = new AGALMiniAssembler();
+                
+                Starling.current.registerProgram(programName,
+                    assembler.assemble(Context3DProgramType.VERTEX, vertexProgramCode),
+                    assembler.assemble(Context3DProgramType.FRAGMENT, fragmentProgramCode));
+                
+                mProgram = Starling.current.getProgram(programName);
+            }
         }
         
+        public function get isEmitting():Boolean { return mEmissionTime > 0 && mEmissionRate > 0; }
         public function get capacity():int { return mVertexData.numVertices / 4; }
         public function get numParticles():int { return mNumParticles; }
         
         public function get maxCapacity():int { return mMaxCapacity; }
-        public function set maxCapacity(value:int):void { mMaxCapacity = Math.min(8192, value); }
+        public function set maxCapacity(value:int):void
+        {
+            mMaxCapacity = Math.min(MAX_NUM_PARTICLES, value);
+        }
         
         public function get emissionRate():Number { return mEmissionRate; }
         public function set emissionRate(value:Number):void { mEmissionRate = value; }
@@ -436,6 +463,21 @@ package starling.extensions
         public function set blendFactorDestination(value:String):void { mBlendFactorDestination = value; }
         
         public function get texture():Texture { return mTexture; }
-        public function set texture(value:Texture):void { mTexture = value; createProgram(); }
+        public function set texture(value:Texture):void
+        {
+            mTexture = value;
+            createProgram();
+            for (var i:int = mVertexData.numVertices - 4; i >= 0; i -= 4)
+            {
+                mVertexData.setTexCoords(i + 0, 0.0, 0.0);
+                mVertexData.setTexCoords(i + 1, 1.0, 0.0);
+                mVertexData.setTexCoords(i + 2, 0.0, 1.0);
+                mVertexData.setTexCoords(i + 3, 1.0, 1.0);
+                mTexture.adjustVertexData(mVertexData, i, 4);
+            }
+        }
+        
+        public function get smoothing():String { return mSmoothing; }
+        public function set smoothing(value:String):void { mSmoothing = value; }
     }
 }
